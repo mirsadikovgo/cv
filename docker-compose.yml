@@ -1,0 +1,48 @@
+# Integrates with an ALREADY-RUNNING Traefik on the external `traefik-net`
+# network, with HTTPS via Let's Encrypt (certresolver `le`) and HTTP→HTTPS
+# redirect. No ports are published — all traffic goes through Traefik.
+#
+#   docker compose up -d --build
+#
+# Assumes on the server:
+#   - Traefik running with entrypoints `web` (:80) and `websecure` (:443)
+#   - certresolver named `le`
+#   - `docker network create traefik-net` already done
+
+services:
+  cv:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: cv:latest
+    container_name: cv
+    restart: unless-stopped
+    networks:
+      - traefik-net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-net"
+
+      # ---- HTTPS router ----
+      - "traefik.http.routers.cv.rule=Host(`mirsadikov.uz`)"
+      - "traefik.http.routers.cv.entrypoints=websecure"
+      - "traefik.http.routers.cv.tls=true"
+      - "traefik.http.routers.cv.tls.certresolver=le"
+      # nginx listens on 80 inside the container
+      - "traefik.http.services.cv.loadbalancer.server.port=80"
+      # HSTS
+      - "traefik.http.routers.cv.middlewares=cv-sec@docker"
+      - "traefik.http.middlewares.cv-sec.headers.stsSeconds=31536000"
+      - "traefik.http.middlewares.cv-sec.headers.stsIncludeSubdomains=true"
+      - "traefik.http.middlewares.cv-sec.headers.stsPreload=true"
+
+      # ---- HTTP router → permanent redirect to HTTPS ----
+      - "traefik.http.routers.cv-http.rule=Host(`mirsadikov.uz`)"
+      - "traefik.http.routers.cv-http.entrypoints=web"
+      - "traefik.http.routers.cv-http.middlewares=cv-https@docker"
+      - "traefik.http.middlewares.cv-https.redirectscheme.scheme=https"
+      - "traefik.http.middlewares.cv-https.redirectscheme.permanent=true"
+
+networks:
+  traefik-net:
+    external: true
